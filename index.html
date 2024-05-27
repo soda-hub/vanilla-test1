@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="jp">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>MediaPipe Pose Game</title>
+    <meta charset="utf-8">
+    <link rel="icon" href="favicon.ico">
+    <link rel="stylesheet" type="text/css"
+        href="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils_3d@0.3/control_utils_3d.css"
+        crossorigin="anonymous">
+    <link rel="stylesheet" type="text/css"
+        href="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils@0.6/control_utils.css" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.3/css/bulma.min.css">
+</head>
+
+<body>
+    <section class="container">
+        <div class="columns is-multiline">
+            <div class="column is-10 is-offset-1 register">
+                <h1 class="title">Fitness App</h1>
+
+
+                <div class="box">
+
+                    <!-- WEBCAM INPUT -->
+                    <div class="is-hidden">
+                        <video class="input_video"></video>
+                    </div>
+
+                    <!-- MEDIAPIPE OUTPUT -->
+                    <article class="is-info">
+                        <canvas class="output_canvas" style="width: 100%;">
+                            <h1>
+                                <a id="score">0</a>
+                                <a id="time">60</a>
+                                <a id="hi-score">30</a>
+                            </h1>
+                        </canvas>
+                    </article>
+                </div>
+
+                <div class="columns is-hidden">
+                    <div class="column is-three-fifths is-offset-one-fifth">
+                        <div class="control-panel"></div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </section>
+</body>
+
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils@0.6/control_utils.js"
+    crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3/drawing_utils.js"
+    crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js" crossorigin="anonymous"></script>
+
+<style>
+    body {
+        background-image: linear-gradient(90deg, rgba(103, 126, 250, 1), rgba(142, 84, 219, 1));
+    }
+
+    .output_canvas {
+        display: block;
+        /* ブロックレベル要素として扱う */
+        margin: auto;
+        /* 中央寄せ */
+        /* 水平方向の中央揃え */
+        border: 2px solid white;
+        /* 白い枠線 */
+        border-radius: 15px;
+        /* 角を丸くする */
+        max-width: 95%;
+        /* 余白を持たせる */
+        max-height: 95vh;
+        /* 画面の高さに対して余白を持たせる */
+    }
+</style>
+
+
+<script>
+    // メディアパイプ関連のオブジェクトをグローバルスコープから取得
+    const mpPose = window;
+    const drawingUtils = window;
+    const controls = window;
+    const controls3d = window;
+
+    // HTML要素を取得
+    const videoElement = document.getElementsByClassName('input_video')[0];
+    const canvasElement = document.getElementsByClassName('output_canvas')[0];
+    const controlsElement = document.getElementsByClassName('control-panel')[0];
+    const canvasCtx = canvasElement.getContext('2d');
+    const scoreElement = document.getElementById('score');
+    const timeElement = document.getElementById('time');
+    const hiScoreElement = document.getElementById('hi-score');
+    const hiScoreKey = 'hi-score';
+
+    // 初期スコア、タイマー、ハイスコアの設定
+    scoreElement.innerText = 0;
+    timeElement.innerText = 60;
+    hiScoreElement.innerText = localStorage.getItem(hiScoreKey) ? localStorage.getItem(hiScoreKey) : 30;
+
+    // MediaPipe Poseの設定
+    const config = {
+        locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/pose@${mpPose.VERSION}/${file}`;
+        }
+    };
+
+    // 自撮りモードの設定
+    const selfieMode = true;
+    const fingerThreshold = 0.05; // 人差し指の位置チェックの閾値
+
+    // チェックポイントのサイズと位置
+    const checkHeight = 0.2;
+    const checkWidth = 0.2;
+    let checkXCenter = 0.5; // 中心X座標（0.1~0.9）
+    let checkYCenter = 0.5; // 中心Y座標（0.1~0.9）
+
+    // 新しいチェックポイントを設定する関数
+    function newCheckPoint() {
+        const max = 85;
+        const min = 15;
+        checkXCenter = (Math.random() * (max - min) + min) / 100;
+        checkYCenter = (Math.random() * (max - min) + min) / 100;
+    }
+
+    // ポーズ検出結果の処理関数
+    function onResults(results) {
+        // キャンバスをクリア
+        canvasCtx.save();
+        canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+
+        // ポーズランドマークが存在する場合
+        if (results.poseLandmarks) {
+            // 両手の人差し指のランドマークを取得
+            const leftIndexFinger = results.poseLandmarks[19]; // 左手の人差し指
+            const rightIndexFinger = results.poseLandmarks[20]; // 右手の人差し指
+
+            // 骨格を描画
+            drawingUtils.drawConnectors(canvasCtx, results.poseLandmarks, mpPose.POSE_CONNECTIONS, { color: '#00FF00' });
+            // 人差し指のランドマークを描画
+            drawingUtils.drawLandmarks(canvasCtx, [leftIndexFinger, rightIndexFinger], {
+                color: '#FF0000',
+                fillColor: '#FF0000',
+                radius: (data) => {
+                    return drawingUtils.lerp(data.from.z, -0.15, .1, 10, 1);
+                }
+            });
+
+            // タイマーが0より大きい場合
+            if (timeElement.innerText > 0) {
+                // チェックポイントの矩形を描画
+                drawingUtils.drawRectangle(canvasCtx, {
+                    height: checkHeight,
+                    width: checkWidth,
+                    xCenter: checkXCenter,
+                    yCenter: checkYCenter
+                }, {
+                    color: 'red',
+                    lineWidth: 13,
+                    fillColor: '#00000000'
+                });
+                // 両手の人差し指の位置がチェックポイント内にある場合
+                if (
+                    ((checkYCenter + fingerThreshold) > leftIndexFinger.y && (checkYCenter - fingerThreshold) < leftIndexFinger.y) &&
+                    ((checkXCenter + fingerThreshold) > leftIndexFinger.x && (checkXCenter - fingerThreshold) < leftIndexFinger.x) ||
+                    ((checkYCenter + fingerThreshold) > rightIndexFinger.y && (checkYCenter - fingerThreshold) < rightIndexFinger.y) &&
+                    ((checkXCenter + fingerThreshold) > rightIndexFinger.x && (checkXCenter - fingerThreshold) < rightIndexFinger.x)
+                ) {
+                    // スコアを更新し、新しいチェックポイントを設定
+                    scoreElement.innerText = parseInt(scoreElement.innerText) + 1;
+                    newCheckPoint();
+                }
+            }
+        }
+        canvasCtx.restore();
+    }
+
+    // MediaPipe Poseのインスタンスを作成
+    const pose = new mpPose.Pose(config);
+    pose.onResults(onResults);
+
+    // コントロールパネルの設定
+    new controls
+        .ControlPanel(controlsElement, {
+            selfieMode: selfieMode,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        })
+        .add([
+            new controls.StaticText({ title: 'MediaPipe Pose' }),
+            new controls.Toggle({ title: 'Selfie Mode', field: 'selfieMode' }),
+            new controls.SourcePicker({
+                onFrame: async (input, size) => {
+                    const aspect = size.height / size.width;
+                    let width, height;
+                    if (window.innerWidth > window.innerHeight) {
+                        height = window.innerHeight;
+                        width = height / aspect;
+                    } else {
+                        width = window.innerWidth;
+                        height = width * aspect;
+                    }
+                    canvasElement.width = width;
+                    canvasElement.height = height;
+                    await pose.send({ image: input });
+                },
+            }),
+            new controls.Slider({
+                title: 'Model Complexity',
+                field: 'modelComplexity',
+                discrete: ['Lite', 'Full'],
+            }),
+            new controls.Slider({
+                title: 'Min Detection Confidence',
+                field: 'minDetectionConfidence',
+                range: [0, 1],
+                step: 0.01
+            }),
+            new controls.Slider({
+                title: 'Min Tracking Confidence',
+                field: 'minTrackingConfidence',
+                range: [0, 1],
+                step: 0.01
+            }),
+        ])
+        .on(x => {
+            const options = x;
+            videoElement.classList.toggle('selfie', options.selfieMode);
+            pose.setOptions(options);
+        });
+
+    // ゲームを初期化する関数
+    function initGame() {
+        newCheckPoint(); // 新しいチェックポイントを設定
+        setInterval(() => {
+            // タイマーが0より大きい場合、タイマーを減少
+            if (parseInt(timeElement.innerText) > 0) {
+                timeElement.innerText = parseInt(timeElement.innerText) - 1;
+            } else {
+                // ゲームオーバーの処理
+                alert('Game Over! Your score: ' + scoreElement.innerText);
+                scoreElement.innerText = 0;
+                timeElement.innerText = 60;
+                newCheckPoint();
+            }
+        }, 1000);
+    }
+
+    // ウィンドウがロードされたときにゲームを開始
+    window.onload = initGame;
+
+</script>
+
+</html>
